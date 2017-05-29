@@ -47,7 +47,7 @@ class ResultEndpoint(object):
         action_result = result.get('action', {})
 
         unit = session.get_session()
-        environment = unit.query(models.Environment).get(environment_id)
+        environment = environments.EnvironmentServices.get(environment_id)
 
         if not environment:
             LOG.warning('Environment result could not be handled, '
@@ -68,7 +68,7 @@ class ResultEndpoint(object):
             action_name = 'Deletion'
             deleted = True
         environment.version += 1
-        environment.save(unit)
+        environments.EnvironmentServices.save(environment)
 
         # close deployment
         deployment = get_last_deployment(unit, environment.id)

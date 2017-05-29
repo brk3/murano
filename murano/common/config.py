@@ -138,6 +138,11 @@ murano_opts = [
                      '"insecure" SSL connections and transfers used by '
                      'Murano engine.'),
 
+    cfg.BoolOpt('encrypt_data', default=False,
+                help='This option tells Murano to encrypt object model data'
+                     'stored in the database. Requires a key manager such'
+                     'as Barbican to be configured.'),
+
     cfg.StrOpt('cacert',
                help='(SSL) Tells Murano to use the specified client '
                'certificate file when communicating with Murano API '

@@ -12,11 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import datetime as dt
+import json
 import mock
 import uuid
 
 from oslo_utils import timeutils
 
+from murano.common import exceptions
 from murano.db import models
 from murano.db.services import environments
 from murano.db import session as db_session
@@ -35,8 +37,14 @@ class TestEnvironmentServices(base.MuranoWithDBTestCase):
             name='test_environment', tenant_id='test_tenant_id',
             version=LATEST_VERSION
         )
+        self.encrypted_environment = models.Environment(
+            name='test_environment', tenant_id='test_tenant_id',
+            version=LATEST_VERSION,
+            description='fbf1a508-9d55-408d-a186-baf7a9174058'
+        )
 
         self.env_services = environments.EnvironmentServices()
+        self.dummy_context = utils.dummy_context()
 
     def test_environment_ready_if_last_session_deployed_after_failed(self):
         """Test environment ready status
@@ -131,3 +139,89 @@ class TestEnvironmentServices(base.MuranoWithDBTestCase):
                                                    session_id=None,
                                                    inner=False))
         self.assertEqual({}, description)
+
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.db_session')
+    @mock.patch('murano.db.services.environments.LOG')
+    def test_get_unencrypted_encrypt_data_off(self, mock_log, mock_db_session,
+                                              mock_key_manager):
+        mock_db_session.get_session().query().get.return_value =\
+            self.environment
+        self.override_config('encrypt_data', False, 'murano')
+        self.env_services.get(self.environment.id)
+        mock_log.warning.assert_not_called()
+        mock_key_manager.get.assert_not_called()
+
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.db_session')
+    @mock.patch('murano.db.services.environments.LOG')
+    def test_get_unencrypted_encrypt_data_on(self, mock_log, mock_db_session,
+                                             mock_key_manager):
+        mock_db_session.get_session().query().get.return_value =\
+            self.environment
+        self.override_config('encrypt_data', True, 'murano')
+        self.env_services.get(self.environment.id)
+        mock_log.warning.assert_called_with(
+            "CONF.murano.encrypt_data is True, but environment with id "
+            "'{}' looks to be unencrypted.".format(self.environment.id))
+        mock_key_manager.get.assert_not_called()
+
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.db_session')
+    @mock.patch('murano.db.services.environments.LOG')
+    def test_get_encrypted_encrypt_data_off(self, mock_log, mock_db_session,
+                                            mock_key_manager):
+        mock_db_session.get_session().query().get.return_value =\
+            self.encrypted_environment
+        self.override_config('encrypt_data', False, 'murano')
+        self.assertRaises(exceptions.EnvironmentLoadException,
+                          self.env_services.get, self.encrypted_environment.id)
+
+    @mock.patch('murano.db.services.environments.castellan_utils')
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.db_session')
+    @mock.patch('murano.db.services.environments.LOG')
+    def test_get_encrypted_encrypt_data_on(self, mock_log, mock_db_session,
+                                           mock_key_manager,
+                                           mock_castellan_utils):
+        encrypted_description = self.encrypted_environment.description
+        mock_db_session.get_session().query().get.return_value =\
+            self.encrypted_environment
+        mock_key_manager.API().get.return_value.get_encoded.return_value =\
+            json.dumps({})
+        mock_castellan_utils.credential_factory.return_value =\
+            self.dummy_context
+        self.override_config('encrypt_data', True, 'murano')
+
+        self.env_services.get(self.encrypted_environment.id)
+
+        mock_key_manager.API().get.assert_called_once_with(
+            self.dummy_context, encrypted_description)
+
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.db_session')
+    def test_save_encrypt_data_off(self, mock_db_session, mock_key_manager):
+        self.override_config('encrypt_data', False, 'murano')
+        self.env_services.save(self.encrypted_environment)
+        mock_key_manager.API().store.assert_not_called()
+        mock_db_session.get_session().add.assert_called_once_with(
+            self.encrypted_environment)
+
+    @mock.patch('murano.db.services.environments.opaque_data')
+    @mock.patch('murano.db.services.environments.key_manager')
+    @mock.patch('murano.db.services.environments.castellan_utils')
+    @mock.patch('murano.db.services.environments.db_session')
+    def test_save_encrypt_data_on(self, mock_db_session, mock_castellan_utils,
+                                  mock_key_manager, mock_opaque_data):
+        self.override_config('encrypt_data', True, 'murano')
+        mock_castellan_utils.credential_factory.return_value =\
+            self.dummy_context
+        mock_data = mock.MagicMock()
+        mock_opaque_data.OpaqueData.return_value = mock_data
+
+        self.env_services.save(self.encrypted_environment)
+
+        mock_key_manager.API().store.assert_called_once_with(
+            self.dummy_context, mock_data)
+        mock_db_session.get_session().add.assert_called_once_with(
+            self.encrypted_environment)

@@ -30,12 +30,13 @@ class ServerTest(base.MuranoTestCase):
         cls.result_endpoint = server.ResultEndpoint()
         cls.dummy_context = test_utils.dummy_context()
 
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
     @mock.patch('murano.common.server.LOG')
     @mock.patch('murano.common.server.get_last_deployment')
     @mock.patch('murano.common.server.models')
     @mock.patch('murano.common.server.session')
     def test_process_result(self, mock_db_session, mock_models,
-                            mock_last_deployment, mock_log):
+                            mock_last_deployment, mock_log, mock_env_services):
         test_result = {
             'model': {
                 'Objects': {
@@ -51,7 +52,7 @@ class ServerTest(base.MuranoTestCase):
                                   tenant_id='test_tenant_id',
                                   description=None,
                                   version=1)
-        mock_db_session.get_session().query().get.return_value = mock_env
+        mock_env_services.get.return_value = mock_env
         mock_db_session.get_session().query().filter_by().count.\
             return_value = 0
 
@@ -80,12 +81,14 @@ class ServerTest(base.MuranoTestCase):
                     tenant_id=mock_env.tenant_id,
                     services=test_result['model']['Objects']['services']))
 
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
     @mock.patch('murano.common.server.LOG')
     @mock.patch('murano.common.server.get_last_deployment')
     @mock.patch('murano.common.server.models')
     @mock.patch('murano.common.server.session')
     def test_process_result_with_errors(self, mock_db_session, mock_models,
-                                        mock_last_deployment, mock_log):
+                                        mock_last_deployment, mock_log,
+                                        mock_env_services):
         test_result = {
             'model': {
                 'Objects': {
@@ -101,7 +104,7 @@ class ServerTest(base.MuranoTestCase):
                                   tenant_id='test_tenant_id',
                                   description=None,
                                   version=1)
-        mock_db_session.get_session().query().get.return_value = mock_env
+        mock_env_services.get.return_value = mock_env
         mock_db_session.get_session().query().filter_by().count.\
             return_value = 1
 
@@ -128,12 +131,14 @@ class ServerTest(base.MuranoTestCase):
                     tenant_id=mock_env.tenant_id,
                     services=test_result['model']['Objects']['services']))
 
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
     @mock.patch('murano.common.server.LOG')
     @mock.patch('murano.common.server.get_last_deployment')
     @mock.patch('murano.common.server.models')
     @mock.patch('murano.common.server.session')
     def test_process_result_with_warnings(self, mock_db_session, mock_models,
-                                          mock_last_deployment, mock_log):
+                                          mock_last_deployment, mock_log,
+                                          mock_env_services):
         test_result = {
             'model': {
                 'Objects': None,
@@ -147,7 +152,7 @@ class ServerTest(base.MuranoTestCase):
                                   tenant_id='test_tenant_id',
                                   description=None,
                                   version=1)
-        mock_db_session.get_session().query().get.return_value = mock_env
+        mock_env_services.get.return_value = mock_env
         # num_errors will be initialized to 0, num_warnings to 1
         mock_db_session.get_session().query().filter_by().count.\
             side_effect = [0, 1]
@@ -175,12 +180,13 @@ class ServerTest(base.MuranoTestCase):
                     tenant_id=mock_env.tenant_id,
                     services=[]))
 
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
     @mock.patch('murano.common.server.LOG')
     @mock.patch('murano.common.server.session')
     def test_process_result_with_no_environment(self, mock_db_session,
-                                                mock_log):
+                                                mock_log, mock_env_services):
         test_result = {'model': None}
-        mock_db_session.get_session().query().get.return_value = None
+        mock_env_services.get.return_value = None
 
         result = self.result_endpoint.process_result(self.dummy_context,
                                                      test_result,

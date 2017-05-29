@@ -16,15 +16,24 @@
 from keystoneclient import exceptions as ks_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import uuidutils
+
+import json
 import six
 import yaml
 
+from castellan.common import exception as castellan_exception
+from castellan.common.objects import opaque_data
+from castellan.common import utils as castellan_utils
+from castellan import key_manager
+
 from murano.common import auth_utils
-from murano.common import uuidutils
+from murano.common import exceptions
 from murano.db import models
 from murano.db.services import sessions
 from murano.db import session as db_session
 from murano.services import states
+
 
 CONF = cfg.CONF
 
@@ -89,6 +98,51 @@ class EnvironmentServices(object):
         return states.EnvironmentStatus.READY
 
     @staticmethod
+    def get(environment_id):
+        unit = db_session.get_session()
+        environment = unit.query(models.Environment).get(environment_id)
+        if (uuidutils.is_uuid_like(environment.description) and
+                CONF.murano.encrypt_data is False):
+            raise exceptions.EnvironmentLoadException(
+                environment_id=environment_id)
+        if (uuidutils.is_uuid_like(environment.description) is False and
+                CONF.murano.encrypt_data):
+            LOG.warning("CONF.murano.encrypt_data is True, but "
+                        "environment with id '{}' looks to be "
+                        "unencrypted.".format(environment_id))
+            return environment
+        if CONF.murano.encrypt_data:
+            manager = key_manager.API()
+            context = castellan_utils.credential_factory(conf=CONF)
+            try:
+                description = manager.get(
+                    context, environment.description).get_encoded()
+            except castellan_exception.KeyManagerError as e:
+                LOG.exception(e)
+                raise
+            environment.description = json.loads(description)
+        return environment
+
+    # TODO(pbourke): need some form of update operation to avoid cluttering
+    # the keymanager
+    @staticmethod
+    def save(environment):
+        if CONF.murano.encrypt_data:
+            manager = key_manager.API()
+            context = castellan_utils.credential_factory(conf=CONF)
+            description_bytes = opaque_data.OpaqueData(bytes(json.dumps(
+                environment.description)))
+            try:
+                stored_key_id = manager.store(context, description_bytes)
+            except castellan_exception.KeyManagerError as e:
+                LOG.exception(e)
+                raise
+            environment.description = stored_key_id
+        unit = db_session.get_session()
+        with unit.begin():
+            unit.add(environment)
+
+    @staticmethod
     def create(environment_params, context):
         # tagging environment by tenant_id for later checks
         """Creates environment with specified params, in particular - name
@@ -98,7 +152,7 @@ class EnvironmentServices(object):
            :return: Created Environment
         """
         objects = {'?': {
-            'id': uuidutils.generate_uuid(),
+            'id': uuidutils.generate_uuid(dashed=False),
         }}
         network_driver = EnvironmentServices.get_network_driver(context)
         objects.update(environment_params)
@@ -119,14 +173,9 @@ class EnvironmentServices(object):
         environment_params['tenant_id'] = context.tenant
         environment = models.Environment()
         environment.update(environment_params)
-
-        unit = db_session.get_session()
-        with unit.begin():
-            unit.add(environment)
-
-        # saving environment as Json to itself
         environment.update({'description': data})
-        environment.save(unit)
+
+        EnvironmentServices.save(environment)
 
         return environment
 
@@ -149,6 +198,15 @@ class EnvironmentServices(object):
         unit = db_session.get_session()
         environment = unit.query(models.Environment).get(environment_id)
         if environment:
+            if CONF.murano.encrypt_data:
+                manager = key_manager.API()
+                context = castellan_utils.credential_factory(conf=CONF)
+                try:
+                    manager.delete(context, environment.description)
+                except (castellan_exception.KeyManagerError,
+                        castellan_exception.ManagedObjectNotFoundError) as e:
+                    LOG.exception(e)
+                    raise
             with unit.begin():
                 unit.delete(environment)
 
@@ -167,23 +225,19 @@ class EnvironmentServices(object):
             Object Model structure
            :return: Environment Description Object
         """
-        unit = db_session.get_session()
-
         if session_id:
-            session = unit.query(models.Session).get(session_id)
+            session = sessions.SessionServices.get(session_id)
             if sessions.SessionServices.validate(session):
                 if session.state != states.SessionState.DEPLOYED:
                     env_description = session.description
                 else:
-                    env = unit.query(models.Environment) \
-                        .get(session.environment_id)
+                    env = EnvironmentServices.get(session.environment_id)
                     env_description = env.description
             else:
-                env = unit.query(models.Environment) \
-                    .get(session.environment_id)
+                env = EnvironmentServices.get(session.environment_id)
                 env_description = env.description
         else:
-            env = (unit.query(models.Environment).get(environment_id))
+            env = EnvironmentServices.get(environment_id)
             env_description = env.description
 
         if not inner:
@@ -200,15 +254,14 @@ class EnvironmentServices(object):
            :param inner: save modifications to only content of environment
             rather than whole Object Model structure
         """
-        unit = db_session.get_session()
-        session = unit.query(models.Session).get(session_id)
+        session = sessions.SessionServices.get(session_id)
         if inner:
             data = session.description.copy()
             data['Objects'] = environment
             session.description = data
         else:
             session.description = environment
-        session.save(unit)
+        EnvironmentServices.save(session)
 
     @staticmethod
     def generate_default_networks(env_name, network_driver):
@@ -228,7 +281,7 @@ class EnvironmentServices(object):
         return {
             'environment': {
                 '?': {
-                    'id': uuidutils.generate_uuid(),
+                    'id': uuidutils.generate_uuid(dashed=False),
                     'type': network_type
                 },
                 'name': env_name + '-network'
@@ -238,8 +291,7 @@ class EnvironmentServices(object):
 
     @staticmethod
     def deploy(session, unit, context):
-        environment = unit.query(models.Environment).get(
-            session.environment_id)
+        environment = EnvironmentServices.get(session.environment_id)
 
         if (session.description['Objects'] is None and
                 'ObjectsCopy' not in session.description):
@@ -252,7 +304,7 @@ class EnvironmentServices(object):
     def _objectify(data, replacements):
         if isinstance(data, dict):
             if isinstance(data.get('?'), dict):
-                data['?']['id'] = uuidutils.generate_uuid()
+                data['?']['id'] = uuidutils.generate_uuid(dashed=False)
             result = {}
             for key, value in data.items():
                 result[key] = EnvironmentServices._objectify(

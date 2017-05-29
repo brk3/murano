@@ -12,10 +12,27 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from castellan.common import exception as castellan_exception
+from castellan.common.objects import opaque_data
+from castellan.common import utils as castellan_utils
+from castellan import key_manager
+
+from murano.common import exceptions
 from murano.db import models
 from murano.db import session as db_session
 from murano.services import actions
 from murano.services import states
+
+from oslo_config import cfg
+from oslo_utils import uuidutils
+
+from oslo_log import log as logging
+
+import json
+
+
+CONF = cfg.CONF
+LOG = logging.getLogger(__name__)
 
 
 class SessionServices(object):
@@ -44,6 +61,48 @@ class SessionServices(object):
 
         return query.order_by(models.Session.version.desc(),
                               models.Session.updated.desc()).all()
+
+    @staticmethod
+    def get(session_id):
+        unit = db_session.get_session()
+        session = unit.query(models.Session).get(session_id)
+        if (uuidutils.is_uuid_like(session.description) and
+                CONF.murano.encrypt_data is False):
+            raise exceptions.SessionLoadException(session_id=session_id)
+        if (uuidutils.is_uuid_like(session.description) is False and
+                CONF.murano.encrypt_data):
+            LOG.warning("CONF.murano.encrypt_data is True, but "
+                        "session with id '{}' looks to be "
+                        "unencrypted.".format(session_id))
+            return session
+        if CONF.murano.encrypt_data:
+            context = castellan_utils.credential_factory(conf=CONF)
+            manager = key_manager.API()
+            try:
+                description = manager.get(context,
+                                          session.description).get_encoded()
+            except castellan_exception.KeyManagerError as e:
+                LOG.exception(e)
+                raise
+            session.description = json.loads(description)
+        return session
+
+    @staticmethod
+    def save(session):
+        if CONF.murano.encrypt_data:
+            manager = key_manager.API()
+            context = castellan_utils.credential_factory(conf=CONF)
+            description_bytes = opaque_data.OpaqueData(
+                bytes(json.dumps(session.description)))
+            try:
+                stored_key_id = manager.store(context, description_bytes)
+            except castellan_exception.KeyManagerError as e:
+                LOG.exception(e)
+                raise
+            session.description = stored_key_id
+        unit = db_session.get_session()
+        with unit.begin():
+            unit.add(session)
 
     @staticmethod
     def create(environment_id, user_id):

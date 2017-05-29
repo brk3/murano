@@ -98,8 +98,7 @@ class Controller(object):
         target = {"environment_id": environment_id}
         policy.check('show_environment', request.context, target)
 
-        session = db_session.get_session()
-        environment = session.query(models.Environment).get(environment_id)
+        environment = envs.EnvironmentServices.get(environment_id)
         env = environment.to_dict()
         env['status'] = envs.EnvironmentServices.get_status(env['id'])
 
@@ -116,7 +115,7 @@ class Controller(object):
         if hasattr(request, 'context') and request.context.session:
             session_id = request.context.session
         if session_id:
-            env_session = session.query(models.Session).get(session_id)
+            env_session = session_services.SessionServices.get(session_id)
             check_session(request, environment_id, env_session, session_id)
 
         # add services to env

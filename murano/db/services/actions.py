@@ -10,15 +10,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from murano.common.helpers import token_sanitizer
 from murano.db import models
+from murano.db import services
 from murano.services import states
-
-
-def get_environment(session, unit):
-    environment = unit.query(models.Environment).get(
-        session.environment_id)
-    return environment
 
 
 def update_task(action, session, task, unit):
@@ -27,15 +21,12 @@ def update_task(action, session, task, unit):
         else states.SessionState.DEPLOYING
     task_info = models.Task()
     task_info.environment_id = session.environment_id
-    if objects:
-        task_info.description = token_sanitizer.TokenSanitizer().sanitize(
-            dict(session.description.get('Objects')))
     task_info.action = task['action']
     status = models.Status()
     status.text = 'Action {0} is scheduled'.format(action)
     status.level = 'info'
     task_info.statuses.append(status)
+    services.sessions.SessionServices.save(session)
     with unit.begin():
-        unit.add(session)
         unit.add(task_info)
     return task_info.id

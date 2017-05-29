@@ -12,6 +12,7 @@
 
 from murano.common import rpc
 from murano.db import models
+from murano.db import services
 from murano.db.services import actions as actions_db
 from murano.services import states
 
@@ -53,8 +54,8 @@ class ActionServices(object):
         status.text = 'Action {0} is scheduled'.format(action[1]['name'])
         status.level = 'info'
         task_info.statuses.append(status)
+        services.sessions.SessionServices.save(session)
         with unit.begin():
-            unit.add(session)
             unit.add(task_info)
 
     @staticmethod
@@ -71,7 +72,8 @@ class ActionServices(object):
     def execute(action_id, session, unit, context, args=None):
         if args is None:
             args = {}
-        environment = actions_db.get_environment(session, unit)
+        environment = services.environments.EnvironmentServices.get(
+            session.environment_id)
         action = ActionServices.find_action(session.description, action_id)
         if action is None:
             raise LookupError('Action is not found')

@@ -115,8 +115,8 @@ class Controller(object):
         LOG.debug('Session:Deploy <SessionId: {s_id}>'.format(s_id=session_id))
 
         unit = db_session.get_session()
-        session = unit.query(models.Session).get(session_id)
 
+        session = sessions.SessionServices.get(session_id)
         check_session(request, environment_id, session, session_id)
 
         if not sessions.SessionServices.validate(session):

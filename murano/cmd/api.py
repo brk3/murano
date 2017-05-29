@@ -59,6 +59,9 @@ def main():
         request_statistics.init_stats()
         policy.init()
 
+        # TODO(pbourke): check if encrypt_data is True that we have key_manager
+        # config present
+
         logging.setup(CONF, 'murano')
         workers = CONF.murano.api_workers
         if not workers:

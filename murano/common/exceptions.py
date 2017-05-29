@@ -71,3 +71,13 @@ class PolicyViolationException(Exception):
 
 class RouterInfoException(Exception):
     pass
+
+
+class EnvironmentLoadException(OpenstackException):
+    msg_fmt = ("Object model for environment id '%(environment_id)' looks to "
+               "be encrypted, but CONF.murano.encrypt_data is False")
+
+
+class SessionLoadException(OpenstackException):
+    msg_fmt = ("Object model for session id '%(session_id)' looks to "
+               "be encrypted, but CONF.murano.encrypt_data is False")

@@ -74,8 +74,9 @@ class TestActions(test_base.MuranoTestCase):
 
         self.assertEqual(expected_task, task)
 
+    @mock.patch('murano.db.services.sessions.SessionServices')
     @mock.patch('murano.services.actions.models')
-    def test_update_task(self, mock_models):
+    def test_update_task(self, mock_models, mock_session_services):
         mock_models.Task = mock.MagicMock()
         mock_models.Status = mock.MagicMock()
         mock_action = [{}, {'name': 'test_action_name'}]
@@ -100,10 +101,10 @@ class TestActions(test_base.MuranoTestCase):
         self.assertEqual('info', mock_models.Status().level)
         mock_models.Task().statuses.append.assert_called_once_with(
             mock_models.Status())
-        self.assertEqual(2, mock_unit.add.call_count)
+        self.assertEqual(1, mock_unit.add.call_count)
         expected_session = mock_session
         expected_session.state = states.SessionState.DEPLOYED
-        mock_unit.add.assert_any_call(expected_session)
+        mock_session_services.save.assert_called_with(mock_session)
         mock_unit.add.assert_called_with(mock_models.Task())
 
     @mock.patch('murano.services.actions.rpc')
@@ -147,12 +148,12 @@ class TestActions(test_base.MuranoTestCase):
                                                  test_unit)
         mock_rpc.engine().handle_task.assert_called_once_with(mock_task)
 
-    @mock.patch('murano.services.actions.actions_db.get_environment')
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
     @mock.patch('murano.services.actions.ActionServices.submit_task')
-    def test_execute(self, mock_submit_task, mock_get_environment):
+    def test_execute(self, mock_submit_task, mock_env_services):
         mock_environment = mock.MagicMock()
+        mock_env_services.get.return_value = mock_environment
         mock_task_id = 'test_task_id'
-        mock_get_environment.return_value = mock_environment
         mock_submit_task.return_value = mock_task_id
 
         test_action_id = 'test_action_id'
@@ -185,8 +186,8 @@ class TestActions(test_base.MuranoTestCase):
                                                  test_session, test_token,
                                                  test_unit)
 
-    @mock.patch('murano.services.actions.actions_db.get_environment')
-    def test_execute_with_invalid_action_id(self, mock_get_environment):
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
+    def test_execute_with_invalid_action_id(self, mock_env_services):
         test_action_id = 'test_action_id'
         test_session = mock.MagicMock(description=[])
 
@@ -194,8 +195,8 @@ class TestActions(test_base.MuranoTestCase):
             actions.ActionServices.execute(test_action_id, test_session,
                                            None, None, None)
 
-    @mock.patch('murano.services.actions.actions_db.get_environment')
-    def test_execute_with_disabled_action(self, mock_get_environment):
+    @mock.patch('murano.db.services.environments.EnvironmentServices')
+    def test_execute_with_disabled_action(self, mock_env_services):
         test_action_id = 'test_action_id'
         test_description = [{
             '?': {
