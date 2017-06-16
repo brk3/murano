@@ -33,6 +33,10 @@ from murano.dsl import dsl
 from murano.dsl import helpers
 from murano.dsl import yaql_integration
 
+from castellan.common import exception as castellan_exception
+from castellan.common import utils as castellan_utils
+from castellan import key_manager
+
 
 _random_string_counter = None
 
@@ -203,6 +207,20 @@ def logger(context, logger_name):
     return log
 
 
+@specs.parameter('value', yaqltypes.String())
+@specs.extension_method
+def decryptData(value):
+    manager = key_manager.API()
+    context = castellan_utils.credential_factory(conf=cfg.CONF)
+    try:
+        data = manager.get(context, value).get_encoded()
+    except castellan_exception.KeyManagerError as e:
+        # TODO(pbourke): get access to LOG
+        # LOG.exception(e)
+        raise
+    return data
+
+
 @helpers.memoize
 def get_context(runtime_version):
     context = yaql_integration.create_empty_context()
@@ -213,6 +231,7 @@ def get_context(runtime_version):
     context.register_function(random_name)
     context.register_function(patch_)
     context.register_function(logger)
+    context.register_function(decryptData)
 
     if runtime_version <= constants.RUNTIME_VERSION_1_1:
         context.register_function(substr)
